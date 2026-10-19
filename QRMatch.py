@@ -755,6 +755,16 @@ def train(args, labeled_trainloader, unlabeled_trainloader, val_loader,
                     args.writer.add_scalar('train/6.grad_cos_ddcl_cons', cos_mean, epoch + 1)
                     logger.info('Gradient cosine (DDCL vs. consistency) at epoch {}: {:.4f}'.format(
                         epoch + 1, cos_mean))
+                    # Redraw the curve after every recorded point, so the final figure is
+                    # ready when training ends. A plotting error never stops training.
+                    try:
+                        from plot_grad_conflict import plot_runs
+                        label = {'with_dtf': 'With DTF', 'without_dtf': 'Without DTF'}.get(
+                            args.grad_cos_tag, args.grad_cos_tag)
+                        plot_runs([(grad_logger.epoch_path, label)],
+                                  os.path.join(args.out, 'grad_conflict_' + args.grad_cos_tag))
+                    except Exception as e:
+                        logger.warning('Gradient cosine plot skipped: {}'.format(e))
 
             is_best = val_acc > best_acc
             best_acc = max(val_acc, best_acc)
