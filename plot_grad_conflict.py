@@ -49,17 +49,8 @@ def pick_color(label, index):
     return FALLBACK_COLORS[index % len(FALLBACK_COLORS)]
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Plot gradient cosine similarity curves")
-    parser.add_argument("--run", nargs=2, action="append", metavar=("CSV", "LABEL"),
-                        help="per-epoch CSV file and its legend label; repeat for several runs")
-    parser.add_argument("--out", default="result/grad_conflict",
-                        help="output path without extension (.svg and .png are written)")
-    parser.add_argument("--ylim", nargs=2, type=float, default=[-0.6, 0.6])
-    args = parser.parse_args()
-
-    runs = args.run or [["result/grad_conflict_with_dtf_epochs.csv", "With DTF"]]
-
+def plot_runs(runs, out, ylim=(-0.6, 0.6)):
+    """Plot one or more runs. runs: list of (csv_path, label). Writes out.svg and out.png."""
     fig, ax = plt.subplots(figsize=(8, 4.2))
     all_epochs = set()
     for i, (path, label) in enumerate(runs):
@@ -69,7 +60,7 @@ def main():
                 markersize=7, markeredgecolor="white", markeredgewidth=1.5, label=label,
                 zorder=3)
 
-    ax.set_ylim(*args.ylim)
+    ax.set_ylim(*ylim)
     ax.set_yticks([-0.6, -0.3, 0.0, 0.3, 0.6])
     ax.set_yticklabels(["-0.6", "-0.3", "0", "0.3", "0.6"])
     if all_epochs:
@@ -89,12 +80,27 @@ def main():
               frameon=False, handlelength=2.5)
     fig.tight_layout()
 
-    out_dir = os.path.dirname(args.out)
+    out_dir = os.path.dirname(out)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(args.out + ".svg")
-    fig.savefig(args.out + ".png", dpi=300)
-    print("Saved", args.out + ".svg", "and", args.out + ".png")
+    fig.savefig(out + ".svg")
+    fig.savefig(out + ".png", dpi=300)
+    plt.close(fig)
+    return out + ".svg", out + ".png"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Plot gradient cosine similarity curves")
+    parser.add_argument("--run", nargs=2, action="append", metavar=("CSV", "LABEL"),
+                        help="per-epoch CSV file and its legend label; repeat for several runs")
+    parser.add_argument("--out", default="result/grad_conflict",
+                        help="output path without extension (.svg and .png are written)")
+    parser.add_argument("--ylim", nargs=2, type=float, default=[-0.6, 0.6])
+    args = parser.parse_args()
+
+    runs = args.run or [["result/grad_conflict_with_dtf_epochs.csv", "With DTF"]]
+    svg, png = plot_runs(runs, args.out, args.ylim)
+    print("Saved", svg, "and", png)
 
 
 if __name__ == "__main__":
