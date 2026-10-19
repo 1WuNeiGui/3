@@ -29,6 +29,7 @@ from copy import deepcopy
 # SAB
 from OTSU import OTSU_threshold
 from SuperAugmentation import Super_Augmentation
+from grad_conflict import GradConflictLogger, encoder_parameters, gradient_cosine, should_measure
 
 logger = logging.getLogger(__name__)
 best_acc = 0
@@ -151,6 +152,15 @@ def main():
                         help='pseudo label threshold')
     parser.add_argument('--out', default='result',
                         help='directory to output the result')
+    # Gradient conflict analysis between L_DDCL and L_cons (cosine similarity of gradients)
+    parser.add_argument('--grad-cos', type=str2bool, default=True,
+                        help='record the cosine similarity between DDCL and consistency gradients')
+    parser.add_argument('--grad-cos-start', default=100, type=int,
+                        help='first epoch (1-based) at which the gradient cosine is recorded')
+    parser.add_argument('--grad-cos-interval', default=25, type=int,
+                        help='record the gradient cosine every N epochs after --grad-cos-start')
+    parser.add_argument('--grad-cos-tag', default='with_dtf', type=str,
+                        help='tag used in the CSV file names, e.g. with_dtf or without_dtf')
     parser.add_argument('--resume', default='', type=str,
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('--seed', default=42, type=int,
@@ -463,6 +473,10 @@ def train(args, labeled_trainloader, unlabeled_trainloader, val_loader,
         from apex import amp
     global best_acc
     lambda_ddcl = 0.5
+    grad_logger = None
+    if args.grad_cos and args.local_rank in [-1, 0]:
+        grad_logger = GradConflictLogger(args.out, tag=args.grad_cos_tag)
+        grad_params = encoder_parameters(model)
     test_accs = []
     OTSU_dict = {}
     history_dict = {}
@@ -674,6 +688,14 @@ def train(args, labeled_trainloader, unlabeled_trainloader, val_loader,
 
             loss = Lx + args.lambda_u * Lu + loss_ddcl
 
+            # Gradient conflict analysis: cosine between grad(L_DDCL) and grad(L_cons)
+            # w.r.t. the shared encoder, before the normal backward pass.
+            if grad_logger is not None and should_measure(
+                    epoch + 1, args.grad_cos_start, args.grad_cos_interval):
+                cos_sim, norm_ddcl, norm_cons = gradient_cosine(loss_ddcl, Lu, grad_params)
+                grad_logger.log_iter(epoch + 1, batch_idx + 1, cos_sim, norm_ddcl, norm_cons,
+                                     loss_ddcl.item(), Lu.item())
+
             if args.amp:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -727,6 +749,12 @@ def train(args, labeled_trainloader, unlabeled_trainloader, val_loader,
             args.writer.add_scalar('train/5.mask', mask_probs.avg, epoch)
             args.writer.add_scalar('test/1.test_acc', val_acc, epoch)
             args.writer.add_scalar('test/2.test_loss', val_loss, epoch)
+            if grad_logger is not None:
+                cos_mean = grad_logger.end_epoch(epoch + 1)
+                if cos_mean is not None:
+                    args.writer.add_scalar('train/6.grad_cos_ddcl_cons', cos_mean, epoch + 1)
+                    logger.info('Gradient cosine (DDCL vs. consistency) at epoch {}: {:.4f}'.format(
+                        epoch + 1, cos_mean))
 
             is_best = val_acc > best_acc
             best_acc = max(val_acc, best_acc)
